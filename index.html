@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+
+	<head>
+		<meta charset="utf-8">
+
+		<title>Real-Time Collaborative Authoring in AEM</title>
+
+		<meta name="description" content="A framework for easily creating beautiful presentations using HTML">
+		<meta name="author" content="Mark Szumowski">
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<link rel="stylesheet" href="css/reveal.min.css">
+		<link rel="stylesheet" href="css/theme/default.css" id="theme">
+
+		<!-- For syntax highlighting -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+		<!-- If the query includes 'print-pdf', include the PDF print sheet -->
+		<!--<script>-->
+			<!--if( window.location.search.match( /print-pdf/gi ) ) {-->
+				<!--var link = document.createElement( 'link' );-->
+				<!--link.rel = 'stylesheet';-->
+				<!--link.type = 'text/css';-->
+				<!--link.href = 'css/print/pdf.css';-->
+				<!--document.getElementsByTagName( 'head' )[0].appendChild( link );-->
+			<!--}-->
+		<!--</script>-->
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+		<style type="text/css">
+			.reveal li {
+				margin-top: 0.5em;
+			}
+			.u {
+				text-decoration: underline;
+			}
+		</style>
+	</head>
+
+	<body>
+		<div class="reveal">
+			<div class="slides">
+
+				<!--Title-->
+				<section>
+					<h1>Real-Time Collaborative Authoring in AEM</h1>
+					<h2>with WebSockets and Netty</h2>
+					<aside class="notes">Title</aside>
+				</section>
+
+				<!--Who am I?-->
+				<section>
+					<h2 class="u">Who Am I?</h2>
+					<h2>Mark Szumowski</h2>
+					<h3>ICF Interactive</h3>
+					<aside class="notes">Introduction</aside>
+				</section>
+
+				<!--Overview-->
+				<section>
+					<h2 class="u">Overview</h2>
+					<ul>
+						<li>Motivation</li>
+						<li>Demo</li>
+						<li>Code + Design
+							<ul>
+								<li>OSGi WebSocket Server</li>
+								<li>RTCA App
+									<ul>
+										<li>Back-end Service + EventHandler</li>
+										<li>Front-end authoring JS</li>
+									</ul>
+								</li>
+							</ul>
+						</li>
+						<li>Production Ready?</li>
+						<li>Future Extensions</li>
+					</ul>
+				</section>
+
+				<!--Motivation-->
+				<section>
+					<h2 class="u">Motivation</h2>
+					<div class="fragment">
+						<h3>See what's going live when you hit publish</h3>
+						<h3>Avoid conflicts and lost work</h3>
+					</div>
+				</section>
+
+				<!--Demo-->
+				<section>
+					<h1>Demo</h1>
+				</section>
+
+				<!--Code + Design-->
+				<section>
+					<h2 class="u">Code + Design in 2 Parts</h2>
+					<ol>
+						<li>OSGi WebSocket server + API</li>
+						<li>Real-Time Collaborative Authoring App<br/>(services and front-end)</li>
+					</ol>
+				</section>
+
+				<!--Java WebSockets-->
+				<section>
+					<h2>Java WebSocket Options</h2>
+					<ul>
+						<li class="fragment highlight-red">Jetty <p class="fragment">... uses javax.servlet 3.0</p></li>
+						<li class="fragment highlight-red">JSR 356 (Java EE 7 WebSockets) <p class="fragment">... Java EE in Felix looks unpleasant</p></li>
+						<li class="fragment highlight-green">Netty <p class="fragment">... it's in the title of the talk</p></li>
+					</ul>
+				</section>
+
+				<!--What is Netty?-->
+				<section>
+					<h2>What is Netty?</h2>
+					<q cite="http://netty.io/">&ldquo;Netty is an asynchronous event-driven network application framework
+						for rapid development of maintainable high performance protocol servers & clients.&rdquo;</q> -- <a href="http://netty.io">netty.io</a>
+					<p class="fragment" style="padding-top: 2em;">... or a bunch of useful abstractions over the websocket protocol, a request pipeline, etc. </p>
+					<aside class="notes">much more than just websockets, but don't need to learn a bunch of irrelevant stuff to use it for that</aside>
+				</section>
+
+				<!--Why Netty?-->
+				<section>
+					<h2>Why Netty?</h2>
+					<ul>
+						<li class="fragment">Well designed API</li>
+						<li class="fragment">Thorough documentation</li>
+						<li class="fragment">Active development community<br>(GitHub, Stack Overflow)</li>
+						<li class="fragment">Ships as OSGi bundles</li>
+					</ul>
+					<aside class="notes">Primary dev also of Apache MINA, netty = attempt to fix mistakes, keep strengiths. Also widely used e.g. Twitter</aside>
+				</section>
+
+				<!--Server code sample-->
+				<section>
+					<h2>Heart of the Server</h2>
+					<pre><code class="java">final ServerBootstrap sb = new ServerBootstrap();
+
+sb.group(bossGroup, workerGroup)
+  .channel(NioServerSocketChannel.class)
+  .childHandler(new ChannelInitializer&lt;SocketChannel&gt;() {
+
+      @Override
+      public void initChannel(final SocketChannel ch) throws Exception {
+          ch.pipeline()
+            .addLast(&quot;dec&quot;, new HttpRequestDecoder())
+            .addLast(&quot;agg&quot;, new HttpObjectAggregator(65536))
+            .addLast(&quot;enc&quot;, new HttpResponseEncoder())
+            .addLast(&quot;auth&quot;, slingAuthHandler)  // OUR CODE
+            .addLast(&quot;dispatcher&quot;, dispatcher); // OUR CODE
+      }
+
+  });
+					</code></pre>
+					<aside class="notes">...like filters in a filter chain</aside>
+				</section>
+
+				<!--Authentication-->
+				<section>
+					<section>
+						<h2>Authentication</h2>
+						<img class="fragment" src="img/login-token-cookie.png" />
+					</section>
+					<section>
+						<img src="img/sling-auth-javadoc-header.png" />
+						<img src="img/sling-auth-method-summary.png" />
+					</section>
+					<section>
+						<h3>Need to bridge APIs</h3>
+						<code>io.netty.handler.codec.http.HttpRequest</code>
+						<p>&#x21D3;</p>
+						<code>javax.servlet.http.HttpServletRequest</code>
+					</section>
+					<section>
+						<pre class="stretch"><code class="java">@Reference
+private AuthenticationSupport auth;
+
+
+protected void channelRead0(ChannelHandlerContext ctx, HttpRequest req)
+        throws Exception {
+
+    WrappedNettyHttpRequest authReq = new WrappedNettyHttpRequest(req);
+    Attribute&lt;ResourceResolver&gt; resolver = ctx.channel().attr(RESOLVER_ATTR_KEY);
+
+    //TODO: make sure this won't try to issue redirects via the null response param
+    if (auth.handleSecurity(authReq, null)) {
+        LOG.debug(&quot;Authentication successful.&quot;);
+        resolver.set((ResourceResolver) authReq.getAttribute(
+                     AuthenticationSupport.REQUEST_ATTRIBUTE_RESOLVER));
+    } else {
+        LOG.debug(&quot;Authentication failed - using anonymous resolver.&quot;);
+        resolver.set(resourceResolverFactory.getResourceResolver(null));
+    }
+    ctx.fireChannelRead(req);
+}
+						</code></pre>
+					</section>
+				</section>
+
+				<!--RTCA App-->
+				<section>
+					<h1>RTCA App</h1>
+					<h3>(RTCA: Real Time Collaborative Authoring)</h3>
+					<ul>
+						<li><code>RTCAService</code>: Connection Aggregation Service</li>
+						<li><code>RTCAListener</code>: Page Edit Listener</li>
+					</ul>
+				</section>
+
+				<!--Service Description-->
+				<section>
+					<h2>Connection Aggregator Service</h2>
+					<p>On connect, adds socket to group based on page path.</p>
+					<p class="fragment">Exposes groups via getter, used by other services.</p>
+					<p class="fragment">... also sends chat status events on connect, disconnect</p>
+				</section>
+
+				<!--Listener/EventHandler-->
+				<section>
+					<h2>Page Event Listener</h2>
+					<p>Sling &nbsp;&nbsp;<code>EventHandler</code>&nbsp;&nbsp; registered for &nbsp;&nbsp;<code>PageEvents</code></p>
+					<p class="fragment">On modification events, sends list of changed paths to sockets connecting from that page.</p>
+					<p class="fragment">Aggregates modification paths since one component
+						edit can yield many changed properties.</p>
+				</section>
+
+				<!--RTCA Front-end title-->
+				<section>
+					<h1>RTCA Front-end</h1>
+				</section>
+
+				<!--Author JS code sample-->
+				<section>
+					<h2>Refresh component by path</h2>
+					<pre><code class="javascript">
+var ed = CQ.WCM.getEditable(path);
+if (!ed) { return; }
+ed.refresh();
+
+// Flash updated component
+ed.getEl()
+    .highlight("ffccaa", {duration: 0.1})
+    .pause(0.1)
+    .highlight("ffccaa", {duration: 0.1})
+    .pause(0.1)
+    .highlight("ffccaa", {duration: 0.1});
+					</code></pre>
+				</section>
+
+				<!--Production Ready?-->
+				<section>
+					<h2>Production Ready?</h2>
+					<ul>
+						<li class="fragment">Clustering</li>
+						<li class="fragment">Logging - won't show up in request.log</li>
+						<li class="fragment">Modification aggregation for component sub-nodes<br/>
+							<code>/content/geometrixx/en/jcr:content/par/a/b/c/d</code>
+						</li>
+						<li class="fragment">In-place editing / dialog-already-open</li>
+					</ul>
+				</section>
+
+				<!--Additional Considerations-->
+				<section>
+					<h2>Additional Considerations</h2>
+					<ul>
+						<li>Proxy ws connections through Dispatcher</li>
+						<li>Better configuration (no hard-coded ports)</li>
+						<li>Auto-reconnect on connection drop</li>
+						<li>SSL/wss support (easy with Netty)</li>
+					</ul>
+				</section>
+
+				<!--Future Extensions-->
+				<section>
+					<section>
+						<h1 class="u">Future Extensions?</h1>
+					</section>
+					<section>
+						<h2>Send update notification from browser making update</h2>
+						<ul>
+							<li>better info about which components have changed</li>
+							<li>don't need to filter out own changes in front-end</li>
+						</ul>
+					</section>
+					<section>
+						<h2>Broadcast Alert To All Users</h2>
+						<h3 style="padding-top: 0.5em;">&ldquo;System going down for emergency maintenance&rdquo;</h3>
+					</section>
+					<section>
+						<h2>AEM 6 Touch UI</h2>
+					</section>
+					<section>
+						<h2>Dynamic Handler Service Registration</h2>
+						<ul>
+							<li>OSGi Service Tracker</li>
+							<li>Add handler to DispatcherHandler on bundle activation</li>
+							<li>Clean up and remove handler on deactivation</li>
+						</ul>
+					</section>
+					<section>
+						<h2>Who Is Editing This Component</h2>
+						<h3>Need a "start editing" event to hook</h3>
+						<ul>
+							<li>Dialog before-open?</li>
+							<li>Editable JS open dialog?</li>
+							<li>in-place editing start function?</li>
+						</ul>
+					</section>
+					<section>
+						<h2>Workflow Participant Step</h2>
+						<h3 style="padding-top: 0.5em;">Ping participant directly if they're online</h3>
+					</section>
+					<section>
+						<h2>Home-brewed analytics</h2>
+						<ul>
+							<li>Dashboard showing real-time page edits?</li>
+							<li>How many people are using the system right now?</li>
+						</ul>
+					</section>
+				</section>
+
+				<!--Questions?-->
+				<section>
+					<h1>Questions?</h1>
+				</section>
+
+
+			</div>
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.min.js"></script>
+
+		<script>
+			// Full list of configuration options available here:
+			// https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+
+				theme: 'default', //Reveal.getQueryHash().theme, // available themes are in /css/theme
+				transition: 'default',//Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+				// Parallax scrolling
+				// parallaxBackgroundImage: 'https://s3.amazonaws.com/hakim-static/reveal-js/reveal-parallax-1.jpg',
+				// parallaxBackgroundSize: '2100px 900px',
+
+				// Optional libraries used to extend on reveal.js
+				dependencies: [
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+//					{ src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+//					{ src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+					{ src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+					{ src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }
+				]
+			});
+		</script>
+
+	</body>
+</html>
